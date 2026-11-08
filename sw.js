@@ -1,9 +1,10 @@
 // Service worker: deixa o app abrir rápido e funcionar sem internet.
-const CACHE = 'meu-ciclo-v1';
+// Ao lançar uma versão nova, aumente este número junto com o ?v= do index.html.
+const CACHE = 'meu-ciclo-v4';
 const SHELL = [
   './',
   './index.html',
-  './app.js',
+  './app.js?v=4',
   './firebase-config.js',
   './manifest.json',
   './icons/icon-180.png',
@@ -31,7 +32,7 @@ self.addEventListener('fetch', (e) => {
   // e usa a cópia salva quando estiver sem conexão.
   if (url.origin === self.location.origin) {
     e.respondWith(
-      fetch(req)
+      fetch(req, { cache: 'no-cache' }) // sempre confere se há versão nova no servidor
         .then((res) => {
           const copy = res.clone();
           caches.open(CACHE).then((c) => c.put(req, copy));
