@@ -790,6 +790,13 @@ function setupAuthScreen(fb) {
     toast('Enviamos um e-mail para você trocar a senha. Confira o spam.');
   }, e.currentTarget);
   pass.addEventListener('keydown', (e) => { if (e.key === 'Enter') $('#au-login').click(); });
+  $('#au-eye').onclick = () => {
+    const show = pass.type === 'password';
+    pass.type = show ? 'text' : 'password';
+    $('#au-eye .eye-on').classList.toggle('hidden', show);
+    $('#au-eye .eye-off').classList.toggle('hidden', !show);
+    $('#au-eye').setAttribute('aria-label', show ? 'Esconder senha' : 'Mostrar senha');
+  };
 }
 
 // ===================================================================
