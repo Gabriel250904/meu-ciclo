@@ -165,6 +165,23 @@
   .toast { position: fixed; left: 50%; bottom: calc(var(--safe-b) + 90px); transform: translateX(-50%) translateY(20px); background: var(--ink); color: #fff; padding: 12px 18px; border-radius: 14px; font-size: 15px; z-index: 30; opacity: 0; transition: all .25s; pointer-events: none; max-width: 90vw; text-align: center; }
   .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
 
+  /* ---------- tutorial de instalação (Safari) ---------- */
+  .install { position: fixed; inset: 0; z-index: 50; background: var(--bg); overflow: auto; padding: calc(var(--safe-t) + 26px) 20px calc(var(--safe-b) + 96px); }
+  .install .wrap { max-width: 440px; margin: 0 auto; }
+  .install .logo { width: 64px; height: 64px; border-radius: 22px; display: block; margin: 0 auto 14px; box-shadow: 0 12px 30px -12px rgba(194,64,95,.6); }
+  .install h1 { text-align: center; font-size: 27px; margin: 0 0 6px; letter-spacing: -.5px; }
+  .install .sub { text-align: center; color: var(--muted); margin: 0 0 22px; }
+  .istep { display: flex; gap: 14px; align-items: flex-start; background: var(--card); border-radius: 20px; padding: 16px; margin-bottom: 10px; box-shadow: 0 8px 24px -16px rgba(90,41,68,.25); }
+  .istep .num { width: 30px; height: 30px; border-radius: 50%; background: var(--red); color: #fff; font-weight: 700; display: grid; place-items: center; flex: none; }
+  .istep b { display: block; margin-bottom: 3px; }
+  .istep span { color: var(--muted); font-size: 14px; }
+  .iicon { display: inline-flex; vertical-align: -6px; width: 26px; height: 26px; border-radius: 8px; background: var(--bg); border: 1px solid var(--line); align-items: center; justify-content: center; margin: 0 2px; }
+  .iicon svg { width: 17px; height: 17px; }
+  .install .skip { display: block; margin: 18px auto 0; color: var(--muted); font-size: 14px; text-decoration: underline; }
+  .install .arrow { position: fixed; left: 0; right: 0; bottom: 0; padding: 26px 0 calc(var(--safe-b) + 8px); background: linear-gradient(to bottom, rgba(251,246,243,0), var(--bg) 40%); display: flex; flex-direction: column; align-items: center; color: var(--red); font-size: 13px; font-weight: 700; white-space: nowrap; pointer-events: none; }
+  .install .arrow svg { width: 30px; height: 30px; animation: bob 1.2s ease-in-out infinite; }
+  @keyframes bob { 0%,100% { transform: translateY(0); } 50% { transform: translateY(7px); } }
+
   .loading { display: grid; place-items: center; min-height: 80vh; color: var(--muted); }
 </style>
 </head>

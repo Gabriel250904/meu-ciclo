@@ -649,6 +649,8 @@ function renderSet() {
       : `<div class="row"><span>Modo</span><span class="muted small">teste (só neste aparelho)</span></div>
          <div class="row"><button class="btn-ghost btn-danger" style="padding:0" data-act="wipe">Apagar dados de teste</button></div>`}
     </div>
+    ${!isStandalone ? `<div class="section-title">Instalar</div>
+    <div class="card"><button class="btn btn-soft" data-act="install">Como instalar no iPhone</button></div>` : ''}
     <div class="section-title">Sobre</div>
     <div class="card small muted">
       A previsão usa as datas de início. Quando há pelo menos ${MIN_TREINO + MIN_TESTES} ciclos registrados, o app testa ${METHODS.length} métodos no seu próprio histórico e usa o que mais acertou. A margem de dias vem do erro real desses testes. Veja os detalhes na aba Histórico.<br><br>
@@ -736,6 +738,7 @@ document.addEventListener('click', async (e) => {
   if (act === 'end-other') return dateSheet({ title: 'Quando acabou?', text: 'Escolha o último dia da menstruação.', label: 'Último dia', action: markEnd });
   if (act === 'go-import') { goTab('set'); return importSheet(); }
   if (act === 'import') return importSheet();
+  if (act === 'install') return showInstall();
   if (act === 'prev-month' || act === 'next-month') {
     const [y, m] = state.calMonth.split('-').map(Number);
     const d = new Date(Date.UTC(y, m - 1 + (act === 'next-month' ? 1 : -1), 1));
@@ -790,9 +793,61 @@ function setupAuthScreen(fb) {
 }
 
 // ===================================================================
+//  TUTORIAL DE INSTALAÇÃO
+//  Aparece quando o app é aberto pelo Safari do iPhone (ainda não instalado).
+//  Para ver em qualquer aparelho: adicione ?instalar no fim do link.
+// ===================================================================
+const isIOS = /iPhone|iPad|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+const isStandalone = window.navigator.standalone === true || window.matchMedia('(display-mode: standalone)').matches;
+
+function showInstall() {
+  if (document.getElementById('install')) return;
+  const share = `<span class="iicon"><svg viewBox="0 0 24 24" fill="none" stroke="#0A84FF" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12M8 7l4-4 4 4"/><path d="M6 11H5a1 1 0 0 0-1 1v8a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-8a1 1 0 0 0-1-1h-1"/></svg></span>`;
+  const more = `<span class="iicon" style="font-weight:700;letter-spacing:1px;font-size:13px">•••</span>`;
+  const plus = `<span class="iicon"><svg viewBox="0 0 24 24" fill="none" stroke="#2B1A22" stroke-width="2" stroke-linecap="round"><rect x="4" y="4" width="16" height="16" rx="4"/><path d="M12 8v8M8 12h8"/></svg></span>`;
+  const el = document.createElement('section');
+  el.id = 'install';
+  el.className = 'install';
+  el.innerHTML = `
+    <div class="wrap">
+      <img class="logo" src="icons/icon-180.png" alt="">
+      <h1>Instale o Meu Ciclo</h1>
+      <p class="sub">Leva 10 segundos. Ele fica na sua tela inicial, igual a um app.</p>
+      <div class="istep"><div class="num">1</div><div>
+        <b>Toque em Compartilhar ${share}</b>
+        <span>Fica na barra do Safari, embaixo. Se não aparecer, toque em ${more} primeiro e depois em Compartilhar.</span>
+      </div></div>
+      <div class="istep"><div class="num">2</div><div>
+        <b>Toque em "Adicionar à Tela de Início" ${plus}</b>
+        <span>Role a lista para baixo. Se não estiver lá, toque em "Ver mais".</span>
+      </div></div>
+      <div class="istep"><div class="num">3</div><div>
+        <b>Toque em Adicionar</b>
+        <span>Depois feche o Safari e abra o Meu Ciclo pelo ícone <img src="icons/icon-180.png" style="width:20px;height:20px;border-radius:5px;vertical-align:-5px"> na sua tela.</span>
+      </div></div>
+      ${isIOS && /CriOS|FxiOS|EdgiOS/.test(navigator.userAgent) ? `<div class="banner" style="margin-top:14px">Você está em outro navegador. Se não encontrar a opção, copie o link e abra no <b>Safari</b>.</div>` : ''}
+      <button class="skip" id="install-skip">Continuar sem instalar</button>
+    </div>
+    <div class="arrow">Compartilhar fica aqui embaixo<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4v15M6 13l6 6 6-6"/></svg></div>`;
+  document.body.appendChild(el);
+  el.querySelector('#install-skip').onclick = () => {
+    try { sessionStorage.setItem('meu_ciclo_skip_install', '1'); } catch { }
+    el.remove();
+  };
+}
+
+function maybeShowInstall() {
+  const forced = /[?&]instalar/.test(location.search);
+  let skipped = false;
+  try { skipped = sessionStorage.getItem('meu_ciclo_skip_install') === '1'; } catch { }
+  if (forced || (isIOS && !isStandalone && !skipped)) showInstall();
+}
+
+// ===================================================================
 //  INÍCIO
 // ===================================================================
 async function boot() {
+  maybeShowInstall();
   if ('serviceWorker' in navigator && location.protocol !== 'file:') {
     navigator.serviceWorker.register('./sw.js').catch(() => { });
   }
