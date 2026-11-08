@@ -31,6 +31,41 @@ const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&
 // ===================================================================
 const MAX_CICLOS = 6;
 
+// ---- Métodos candidatos. O app testa todos no histórico dela e usa o que mais acertou. ----
+const wavg = (a) => { let sw = 0, s = 0; a.forEach((x, i) => { sw += i + 1; s += (i + 1) * x; }); return s / sw; };
+const median = (a) => { const s = [...a].sort((x, y) => x - y), m = s.length >> 1; return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2; };
+const trimmed = (a) => { if (a.length < 5) return a.reduce((x, y) => x + y, 0) / a.length; const s = [...a].sort((x, y) => x - y).slice(1, -1); return s.reduce((x, y) => x + y, 0) / s.length; };
+export const METHODS = [
+  { id: 'wavg6', name: 'média dos últimos 6 ciclos, com mais peso nos recentes', fn: (c) => wavg(c.slice(-6)) },
+  { id: 'wavg3', name: 'média dos últimos 3 ciclos, com mais peso nos recentes', fn: (c) => wavg(c.slice(-3)) },
+  { id: 'wavg12', name: 'média dos últimos 12 ciclos, com mais peso nos recentes', fn: (c) => wavg(c.slice(-12)) },
+  { id: 'med5', name: 'mediana dos últimos 5 ciclos (ignora meses fora do normal)', fn: (c) => median(c.slice(-5)) },
+  { id: 'med9', name: 'mediana dos últimos 9 ciclos (ignora meses fora do normal)', fn: (c) => median(c.slice(-9)) },
+  { id: 'trim8', name: 'média dos últimos 8 ciclos, sem o maior e o menor', fn: (c) => trimmed(c.slice(-8)) }
+];
+const MIN_TREINO = 3;   // ciclos mínimos antes de começar a testar
+const MIN_TESTES = 3;   // testes mínimos para confiar no resultado
+
+export function backtest(lens) {
+  if (lens.length < MIN_TREINO + MIN_TESTES) return null;
+  const res = METHODS.map((m) => {
+    const errs = [];
+    for (let i = MIN_TREINO; i < lens.length; i++) {
+      // usa só os ciclos de antes, prevê o seguinte e compara com o que aconteceu
+      errs.push(Math.abs(Math.round(m.fn(lens.slice(0, i))) - lens[i]));
+    }
+    const recentErrs = errs.slice(-12); // o desempenho recente é o que importa
+    const mae = recentErrs.reduce((a, b) => a + b, 0) / recentErrs.length;
+    return { ...m, errs: recentErrs, mae };
+  });
+  // o menor erro médio vence; empate fica com o método padrão (primeiro da lista)
+  const best = res.reduce((b, r) => (r.mae < b.mae - 0.05 ? r : b), res[0]);
+  const sortedErrs = [...best.errs].sort((a, b) => a - b);
+  const p80 = sortedErrs[Math.min(sortedErrs.length - 1, Math.ceil(sortedErrs.length * 0.8) - 1)];
+  const within = (k) => best.errs.filter((e) => e <= k).length / best.errs.length;
+  return { best, all: res, tests: best.errs.length, p80, within };
+}
+
 export function predict(periods, hoje = today()) {
   const ps = [...periods].filter((p) => p.start).sort((a, b) => (a.start < b.start ? -1 : 1));
   if (!ps.length) return null;
@@ -61,12 +96,26 @@ export function predict(periods, hoje = today()) {
   else margin = Math.min(7, Math.max(1, Math.round(sd)));
   if (recent.length > 0 && recent.length < 3) margin = Math.max(margin, 3);
 
+  // Com histórico suficiente: testa os métodos e usa o que mais acertou para ela.
+  // A margem passa a ser o erro real: cobre ~80% dos ciclos antigos.
+  const lens = cycles.map((c) => c.len);
+  const bt = backtest(lens);
+  let method = METHODS[0];
+  if (bt) {
+    method = bt.best;
+    avg = bt.best.fn(lens);
+    margin = Math.min(7, Math.max(1, bt.p80));
+  }
+
   const last = ps[ps.length - 1];
   const avgR = Math.round(avg);
   const next = addDays(last.start, avgR);
 
   let confidence;
-  if (recent.length === 0) confidence = { level: 0, text: 'Estimativa padrão de 28 dias' };
+  if (bt) {
+    const pct = Math.round(bt.within(margin) * 100);
+    confidence = { level: bt.best.mae <= 1.5 ? 3 : 2, text: `Acertou ${pct}% dos ciclos antigos com ±${margin} ${margin === 1 ? 'dia' : 'dias'}` };
+  } else if (recent.length === 0) confidence = { level: 0, text: 'Estimativa padrão de 28 dias' };
   else if (recent.length < 3) confidence = { level: 1, text: `Baseada em ${recent.length} ${recent.length === 1 ? 'ciclo' : 'ciclos'}` };
   else if (sd <= 2) confidence = { level: 3, text: `Ciclo regular · ${recent.length} ciclos` };
   else if (sd <= 4) confidence = { level: 2, text: `Pouca variação · ${recent.length} ciclos` };
@@ -76,7 +125,7 @@ export function predict(periods, hoje = today()) {
   const ongoing = !last.end && daysSinceStart >= 0 && daysSinceStart < 15;
 
   return {
-    ps, cycles, recent, avg, avgR, sd, margin, avgDur, last, next,
+    ps, cycles, recent, avg, avgR, sd, margin, avgDur, last, next, bt, method,
     from: addDays(next, -margin), to: addDays(next, margin),
     daysUntil: diff(hoje, next),
     cycleDay: daysSinceStart + 1,
@@ -533,9 +582,32 @@ function renderHist() {
         <div class="chart">
           ${cs.map((c, i) => `<div class="bar ${i === cs.length - 1 ? 'last' : ''}"><b>${c.len}</b><i style="height:${30 + ((c.len - min) / span) * 70}%"></i><span>${fmtShort(c.start).replace(' ', ' ')}</span></div>`).join('')}
         </div>
-        <div class="chart-avg">Média ponderada: <b>${pr.avg.toFixed(1)} dias</b> · os ciclos mais recentes pesam mais na previsão.</div>
+        <div class="chart-avg">Próximo ciclo previsto: <b>${pr.avg.toFixed(1).replace('.', ',')} dias</b>.</div>
       </div>`;
   }
+
+  let how = '';
+  if (pr.bt) {
+    const fmtE = (x) => x.toFixed(1).replace('.', ',');
+    const rows = [...pr.bt.all].sort((a, b) => a.mae - b.mae);
+    how = `
+      <div class="section-title">Como a previsão é feita</div>
+      <div class="card">
+        <p class="small" style="margin:0 0 10px">O app testou ${METHODS.length} métodos nos seus ${pr.bt.tests} ciclos anteriores: pra cada um, previu a data sem saber a resposta e conferiu o erro. Usa o que mais acertou pra você:</p>
+        <div style="background:var(--red-soft);border-radius:14px;padding:12px 14px;margin-bottom:10px">
+          <b>${pr.method.name[0].toUpperCase() + pr.method.name.slice(1)}</b><br>
+          <span class="small">Erro médio: ${fmtE(pr.method.mae)} ${pr.method.mae === 1 ? 'dia' : 'dias'} · ${Math.round(pr.bt.within(1) * 100)}% dos ciclos com até 1 dia de diferença</span>
+        </div>
+        <details><summary class="small" style="color:var(--red-dark);font-weight:600">Ver todos os métodos</summary>
+          ${rows.map((r) => `<div class="row small"><span>${r.name}</span><span class="muted" style="white-space:nowrap;margin-left:10px">${fmtE(r.mae)} d</span></div>`).join('')}
+        </details>
+      </div>`;
+  } else if (pr.cycles.length) {
+    const falta = MIN_TREINO + MIN_TESTES - pr.cycles.length;
+    how = `<div class="section-title">Como a previsão é feita</div>
+      <div class="card small muted">Por enquanto o app usa a média dos últimos ciclos, com mais peso nos recentes. Com mais ${falta} ${falta === 1 ? 'ciclo registrado' : 'ciclos registrados'}, ele começa a testar ${METHODS.length} métodos no seu histórico e escolhe o que mais acerta pra você.</div>`;
+  }
+  chart += how;
 
   const items = ps.map((p, i) => {
     const nextP = ps[i + 1];
@@ -579,7 +651,7 @@ function renderSet() {
     </div>
     <div class="section-title">Sobre</div>
     <div class="card small muted">
-      A previsão usa as datas de início dos seus últimos ${MAX_CICLOS} ciclos, dando mais peso aos mais recentes. A margem de dias mostra quanto seu ciclo costuma variar.<br><br>
+      A previsão usa as datas de início. Quando há pelo menos ${MIN_TREINO + MIN_TESTES} ciclos registrados, o app testa ${METHODS.length} métodos no seu próprio histórico e usa o que mais acertou. A margem de dias vem do erro real desses testes. Veja os detalhes na aba Histórico.<br><br>
       É uma estimativa para você se organizar. Não serve como método anticoncepcional nem substitui sua médica.
     </div>`;
 }
