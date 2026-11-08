@@ -1,0 +1,221 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<title>Meu Ciclo</title>
+<meta name="theme-color" content="#FBF6F3">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="Meu Ciclo">
+<link rel="manifest" href="manifest.json">
+<link rel="apple-touch-icon" href="icons/icon-180.png">
+<link rel="icon" href="icons/icon-192.png">
+<style>
+  :root {
+    --bg: #FBF6F3;
+    --card: #FFFFFF;
+    --ink: #2B1A22;
+    --muted: #8C7680;
+    --line: #EFE3E0;
+    --red: #C2405F;
+    --red-dark: #9E2F4B;
+    --red-soft: #F7DDE3;
+    --pred: #EDB8C6;
+    --plum: #5A2944;
+    --ok: #4E8A6B;
+    --radius: 22px;
+    --safe-b: env(safe-area-inset-bottom, 0px);
+    --safe-t: env(safe-area-inset-top, 0px);
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { margin: 0; background: var(--bg); color: var(--ink); }
+  body {
+    font-family: ui-rounded, "SF Pro Rounded", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    font-size: 16px; line-height: 1.4;
+    min-height: 100vh; overscroll-behavior-y: none;
+  }
+  button { font: inherit; color: inherit; border: 0; background: none; cursor: pointer; }
+  input, textarea { font: inherit; color: var(--ink); }
+  .hidden { display: none !important; }
+
+  /* ---------- layout ---------- */
+  main { max-width: 520px; margin: 0 auto; padding: calc(var(--safe-t) + 18px) 18px calc(var(--safe-b) + 96px); }
+  .topbar { display: flex; align-items: baseline; justify-content: space-between; margin: 4px 2px 18px; }
+  .topbar h1 { font-size: 28px; margin: 0; letter-spacing: -0.5px; }
+  .topbar .date { color: var(--muted); font-size: 14px; }
+  .card { background: var(--card); border-radius: var(--radius); padding: 20px; margin-bottom: 14px; box-shadow: 0 1px 0 rgba(90,41,68,.04), 0 8px 24px -14px rgba(90,41,68,.18); }
+  .section-title { font-size: 13px; text-transform: uppercase; letter-spacing: .8px; color: var(--muted); margin: 22px 4px 10px; font-weight: 600; }
+
+  /* ---------- hero ---------- */
+  .hero { text-align: center; padding: 28px 20px 22px; position: relative; overflow: hidden; }
+  .hero .label { color: var(--muted); font-size: 15px; }
+  .hero .big { font-size: 64px; font-weight: 700; letter-spacing: -2px; line-height: 1; margin: 10px 0 4px; color: var(--red); }
+  .hero .big small { font-size: 24px; letter-spacing: 0; font-weight: 600; margin-left: 4px; }
+  .hero .when { font-size: 18px; font-weight: 600; }
+  .hero .range { color: var(--muted); font-size: 14px; margin-top: 4px; }
+  .hero.on { background: linear-gradient(160deg, #C2405F, #8E2A47); color: #fff; }
+  .hero.on .label, .hero.on .range { color: rgba(255,255,255,.8); }
+  .hero.on .big { color: #fff; }
+  .hero.late .big { color: var(--plum); }
+  .progress { height: 8px; background: var(--red-soft); border-radius: 99px; margin: 18px 6px 6px; overflow: hidden; }
+  .progress > i { display: block; height: 100%; background: var(--red); border-radius: 99px; }
+  .progress-caption { display: flex; justify-content: space-between; font-size: 12px; color: var(--muted); padding: 0 6px; }
+  .confidence { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); background: var(--bg); padding: 5px 10px; border-radius: 99px; margin-top: 14px; }
+  .hero.on .confidence { background: rgba(255,255,255,.15); color: #fff; }
+  .dot { width: 7px; height: 7px; border-radius: 50%; background: currentColor; display: inline-block; }
+
+  .btn { display: block; width: 100%; padding: 17px; border-radius: 18px; font-weight: 700; font-size: 17px; text-align: center; transition: transform .1s; }
+  .btn:active { transform: scale(.98); }
+  .btn-primary { background: var(--red); color: #fff; }
+  .btn-white { background: #fff; color: var(--red-dark); }
+  .btn-soft { background: var(--red-soft); color: var(--red-dark); }
+  .btn-ghost { color: var(--red-dark); font-weight: 600; font-size: 15px; padding: 12px; }
+  .hero.on .btn-ghost { color: #fff; }
+  .btn-danger { color: #B3261E; font-weight: 600; }
+  .actions { margin-top: 20px; }
+
+  .stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+  .stat { background: var(--card); border-radius: 18px; padding: 14px 10px; text-align: center; box-shadow: 0 8px 24px -16px rgba(90,41,68,.25); }
+  .stat b { display: block; font-size: 24px; letter-spacing: -0.5px; }
+  .stat span { font-size: 12px; color: var(--muted); }
+
+  .empty { text-align: center; padding: 34px 22px; }
+  .empty h2 { margin: 6px 0 6px; font-size: 22px; }
+  .empty p { color: var(--muted); margin: 0 0 18px; }
+
+  /* ---------- calendário ---------- */
+  .cal-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
+  .cal-head h2 { font-size: 19px; margin: 0; text-transform: capitalize; }
+  .cal-nav { width: 38px; height: 38px; border-radius: 50%; background: var(--bg); font-size: 20px; display: grid; place-items: center; }
+  .grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; }
+  .wd { text-align: center; font-size: 12px; color: var(--muted); padding-bottom: 6px; font-weight: 600; }
+  .day { aspect-ratio: 1; border-radius: 50%; display: grid; place-items: center; font-size: 15px; position: relative; }
+  .day.out { color: #CDBFC4; }
+  .day.period { background: var(--red); color: #fff; font-weight: 700; }
+  .day.pred { background: transparent; border: 2px dashed var(--pred); color: var(--red-dark); font-weight: 600; }
+  .day.today { box-shadow: inset 0 0 0 2px var(--ink); }
+  .day.period.today { box-shadow: inset 0 0 0 2px #fff, 0 0 0 2px var(--ink); }
+  .legend { display: flex; gap: 16px; justify-content: center; margin-top: 16px; font-size: 13px; color: var(--muted); flex-wrap: wrap; }
+  .legend i { display: inline-block; width: 14px; height: 14px; border-radius: 50%; vertical-align: -2px; margin-right: 6px; }
+  .lg-period { background: var(--red); }
+  .lg-pred { border: 2px dashed var(--pred); }
+  .lg-today { box-shadow: inset 0 0 0 2px var(--ink); }
+  .hint { text-align: center; color: var(--muted); font-size: 13px; margin-top: 10px; }
+
+  /* ---------- histórico ---------- */
+  .chart { display: flex; align-items: flex-end; gap: 6px; height: 130px; padding-top: 18px; }
+  .bar { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: flex-end; height: 100%; }
+  .bar i { display: block; width: 100%; max-width: 26px; background: var(--red-soft); border-radius: 8px 8px 4px 4px; }
+  .bar.last i { background: var(--red); }
+  .bar b { font-size: 12px; margin-bottom: 4px; }
+  .bar span { font-size: 10px; color: var(--muted); margin-top: 4px; white-space: nowrap; }
+  .chart-avg { font-size: 13px; color: var(--muted); margin-top: 8px; }
+  .item { display: flex; align-items: center; gap: 14px; padding: 14px 4px; border-bottom: 1px solid var(--line); width: 100%; text-align: left; }
+  .item:last-child { border-bottom: 0; }
+  .item .drop { width: 40px; height: 40px; border-radius: 14px; background: var(--red-soft); display: grid; place-items: center; flex: none; }
+  .item .main { flex: 1; min-width: 0; }
+  .item .main b { display: block; }
+  .item .main span { font-size: 13px; color: var(--muted); }
+  .item .side { text-align: right; font-size: 13px; color: var(--muted); }
+  .item .side b { display: block; color: var(--ink); font-size: 16px; }
+  .chev { color: #CDBFC4; font-size: 20px; }
+
+  /* ---------- ajustes ---------- */
+  .row { display: flex; justify-content: space-between; align-items: center; padding: 14px 2px; border-bottom: 1px solid var(--line); }
+  .row:last-child { border-bottom: 0; }
+  .muted { color: var(--muted); }
+  .small { font-size: 13px; }
+  textarea { width: 100%; min-height: 140px; border: 1.5px solid var(--line); border-radius: 14px; padding: 12px; background: var(--bg); resize: vertical; font-size: 15px; }
+  .prompt-box { background: var(--bg); border-radius: 14px; padding: 12px 14px; font-size: 14px; margin: 10px 0; border: 1.5px dashed var(--line); }
+  .preview { max-height: 240px; overflow: auto; margin: 10px 0; }
+  .preview div { padding: 8px 2px; border-bottom: 1px solid var(--line); font-size: 15px; display: flex; justify-content: space-between; }
+  .tag { font-size: 12px; padding: 2px 8px; border-radius: 99px; background: var(--red-soft); color: var(--red-dark); }
+  .tag.skip { background: #EEE; color: #888; }
+  .banner { background: #FFF4D6; color: #6B4E00; border-radius: 16px; padding: 12px 14px; font-size: 14px; margin-bottom: 14px; }
+
+  /* ---------- nav ---------- */
+  nav.tabs { position: fixed; left: 0; right: 0; bottom: 0; background: rgba(251,246,243,.92); backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px); border-top: 1px solid var(--line); display: flex; justify-content: center; padding: 8px 8px calc(var(--safe-b) + 8px); z-index: 10; }
+  nav.tabs .inner { display: flex; width: 100%; max-width: 520px; }
+  nav.tabs button { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 3px; font-size: 11px; color: var(--muted); padding: 4px 0; font-weight: 600; }
+  nav.tabs button svg { width: 25px; height: 25px; }
+  nav.tabs button.active { color: var(--red); }
+
+  /* ---------- sheet ---------- */
+  .backdrop { position: fixed; inset: 0; background: rgba(43,26,34,.35); z-index: 20; opacity: 0; transition: opacity .2s; }
+  .backdrop.show { opacity: 1; }
+  .sheet { position: fixed; left: 0; right: 0; bottom: 0; z-index: 21; background: var(--card); border-radius: 26px 26px 0 0; padding: 10px 20px calc(var(--safe-b) + 20px); max-width: 560px; margin: 0 auto; transform: translateY(100%); transition: transform .25s cubic-bezier(.2,.8,.2,1); max-height: 88vh; overflow: auto; }
+  .sheet.show { transform: translateY(0); }
+  .sheet .grip { width: 40px; height: 5px; border-radius: 99px; background: var(--line); margin: 0 auto 14px; }
+  .sheet h3 { margin: 0 0 6px; font-size: 21px; }
+  .sheet p { margin: 0 0 14px; color: var(--muted); }
+  .field { margin: 12px 0; }
+  .field label { display: block; font-size: 13px; color: var(--muted); margin-bottom: 6px; font-weight: 600; }
+  .field input { width: 100%; padding: 14px; border-radius: 14px; border: 1.5px solid var(--line); background: var(--bg); font-size: 17px; -webkit-appearance: none; appearance: none; min-height: 52px; }
+  .stack > * + * { margin-top: 10px; }
+
+  /* ---------- login ---------- */
+  .auth { max-width: 400px; margin: 0 auto; padding: calc(var(--safe-t) + 60px) 24px 40px; }
+  .auth .logo { width: 84px; height: 84px; border-radius: 24px; margin: 0 auto 18px; display: block; box-shadow: 0 12px 30px -12px rgba(194,64,95,.6); }
+  .auth h1 { text-align: center; margin: 0 0 6px; font-size: 30px; }
+  .auth p.sub { text-align: center; color: var(--muted); margin: 0 0 26px; }
+  .auth .err { color: #B3261E; font-size: 14px; min-height: 20px; text-align: center; margin: 8px 0; }
+
+  .toast { position: fixed; left: 50%; bottom: calc(var(--safe-b) + 90px); transform: translateX(-50%) translateY(20px); background: var(--ink); color: #fff; padding: 12px 18px; border-radius: 14px; font-size: 15px; z-index: 30; opacity: 0; transition: all .25s; pointer-events: none; max-width: 90vw; text-align: center; }
+  .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+
+  .loading { display: grid; place-items: center; min-height: 80vh; color: var(--muted); }
+</style>
+</head>
+<body>
+
+<div id="loading" class="loading">Carregando…</div>
+
+<!-- Tela de login -->
+<section id="auth" class="auth hidden">
+  <img class="logo" src="icons/icon-180.png" alt="">
+  <h1>Meu Ciclo</h1>
+  <p class="sub">Entre para ver seu ciclo em qualquer aparelho.</p>
+  <div class="field"><label for="au-email">E-mail</label><input id="au-email" type="email" autocomplete="email" inputmode="email"></div>
+  <div class="field"><label for="au-pass">Senha</label><input id="au-pass" type="password" autocomplete="current-password" placeholder="mínimo 6 caracteres"></div>
+  <div class="err" id="au-err"></div>
+  <div class="stack">
+    <button class="btn btn-primary" id="au-login">Entrar</button>
+    <button class="btn btn-soft" id="au-signup">Criar conta</button>
+    <button class="btn btn-ghost" id="au-reset">Esqueci a senha</button>
+  </div>
+</section>
+
+<!-- App -->
+<div id="app" class="hidden">
+  <main id="view"></main>
+  <nav class="tabs">
+    <div class="inner">
+      <button data-tab="home" class="active">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3c3.5 4.2 6 7.6 6 10.6A6 6 0 0 1 6 13.6C6 10.6 8.5 7.2 12 3z"/></svg>
+        Início
+      </button>
+      <button data-tab="cal">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="5" width="17" height="15.5" rx="3"/><path d="M3.5 10h17M8 3v4M16 3v4"/></svg>
+        Calendário
+      </button>
+      <button data-tab="hist">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 20V11M12 20V5M19 20v-6"/></svg>
+        Histórico
+      </button>
+      <button data-tab="set">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>
+        Ajustes
+      </button>
+    </div>
+  </nav>
+</div>
+
+<div id="backdrop" class="backdrop hidden"></div>
+<div id="sheet" class="sheet hidden"></div>
+<div id="toast" class="toast"></div>
+
+<script type="module" src="app.js"></script>
+</body>
+</html>
