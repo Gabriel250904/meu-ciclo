@@ -66,7 +66,7 @@ export function backtest(lens) {
   return { best, all: res, tests: best.errs.length, p80, within };
 }
 
-export function predict(periods, hoje = today()) {
+export function predict(periods, hoje = today(), opts = {}) {
   const ps = [...periods].filter((p) => p.start).sort((a, b) => (a.start < b.start ? -1 : 1));
   if (!ps.length) return null;
 
@@ -124,13 +124,96 @@ export function predict(periods, hoje = today()) {
   const daysSinceStart = diff(last.start, hoje);
   const ongoing = !last.end && daysSinceStart >= 0 && daysSinceStart < 15;
 
+  let from = addDays(next, -margin), to = addDays(next, margin), nextFinal = next;
+
+  // ---- Cólica (opcional): ajusta a previsão do ciclo atual quando o padrão dela ajuda ----
+  let cramp = null;
+  if (opts.cramps) {
+    cramp = crampModel(ps, opts.cramps);
+    if (cramp.status === 'active' && !ongoing) {
+      const minDate = addDays(last.start, CRAMP_AFTER_START);
+      const lowWin = addDays(from, -CRAMP_WINDOW);
+      const lo = minDate > lowWin ? minDate : lowWin;
+      const onset = cramp.dates.find((d) => d >= lo && d <= hoje);
+      if (onset) {
+        nextFinal = addDays(onset, cramp.medLag);
+        from = addDays(onset, cramp.minLag);
+        to = addDays(onset, cramp.maxLag);
+        margin = Math.max(diff(from, nextFinal), diff(nextFinal, to), 1);
+        cramp.live = { onset };
+        confidence = { level: 3, text: `Ajustada pela cólica de ${fmtShort(onset)}` };
+      }
+    }
+  }
+
   return {
-    ps, cycles, recent, avg, avgR, sd, margin, avgDur, last, next, bt, method,
-    from: addDays(next, -margin), to: addDays(next, margin),
-    daysUntil: diff(hoje, next),
+    ps, cycles, recent, avg, avgR, sd, margin, avgDur, last, next: nextFinal, bt, method, cramp,
+    from, to,
+    daysUntil: diff(hoje, nextFinal),
     cycleDay: daysSinceStart + 1,
     ongoing, confidence
   };
+}
+
+// ===================================================================
+//  MODELO DA CÓLICA
+//  - Só conta cólicas nos 10 dias antes de cada menstruação (a de TPM).
+//    Cólica no meio do ciclo (ovulação) fica de fora automaticamente.
+//  - Para cada menstruação: "lag" = dias entre a 1ª cólica e o início.
+//  - Precisa de pelo menos 3 menstruações com cólica registrada.
+//  - Testa nos meses antigos (deixando um de fora por vez) se a cólica
+//    acerta mais do que a previsão só pelas datas. Só usa se acertar mais.
+// ===================================================================
+export const CRAMP_WINDOW = 10;
+export const CRAMP_MIN = 3;
+const CRAMP_AFTER_START = 12; // ignora cólicas da própria menstruação
+
+function basePredictionFor(ps, n) {
+  // previsão que o app faria para o início ps[n] usando só o que veio antes
+  const lens = [];
+  for (let i = 1; i < n; i++) {
+    const l = diff(ps[i - 1].start, ps[i].start);
+    if (l >= 15 && l <= 60) lens.push(l);
+  }
+  let avg = 28;
+  if (lens.length) {
+    const bt = backtest(lens);
+    avg = bt ? bt.best.fn(lens) : wavg(lens.slice(-6));
+  }
+  return addDays(ps[n - 1].start, Math.round(avg));
+}
+
+export function crampModel(ps, cramps) {
+  const dates = [...new Set(cramps.map((c) => c.date).filter(isValidISO))].sort();
+  const items = [];
+  for (let n = 1; n < ps.length; n++) {
+    const P = ps[n].start;
+    const prevMin = addDays(ps[n - 1].start, CRAMP_AFTER_START);
+    const win = addDays(P, -CRAMP_WINDOW);
+    const lo = prevMin > win ? prevMin : win;
+    const hi = addDays(P, -1);
+    const onset = dates.find((d) => d >= lo && d <= hi);
+    if (onset) items.push({ start: P, onset, lag: diff(onset, P), baseErr: Math.abs(diff(basePredictionFor(ps, n), P)) });
+  }
+  const res = { dates, items, count: items.length, needed: CRAMP_MIN, status: 'learning' };
+  if (items.length < CRAMP_MIN) return res;
+
+  const lags = items.map((x) => x.lag);
+  res.medLag = Math.round(median(lags));
+  res.minLag = Math.min(...lags);
+  res.maxLag = Math.max(...lags);
+  // teste: prevê cada mês só com os outros meses, e compara com a previsão pelas datas
+  const recentItems = items.slice(-12);
+  let ce = 0, be = 0;
+  recentItems.forEach((it) => {
+    const others = items.filter((o) => o !== it).map((o) => o.lag);
+    ce += Math.abs(Math.round(median(others)) - it.lag);
+    be += it.baseErr;
+  });
+  res.crampMAE = ce / recentItems.length;
+  res.baseMAE = be / recentItems.length;
+  res.status = res.crampMAE < res.baseMAE ? 'active' : 'unhelpful';
+  return res;
 }
 
 // Dias previstos para os próximos ciclos (para o calendário)
@@ -138,7 +221,7 @@ function predictedDays(pr, hoje = today()) {
   const out = new Set();
   if (!pr) return out;
   for (let k = 1; k <= 8; k++) {
-    const s = addDays(pr.last.start, Math.round(pr.avg * k));
+    const s = k === 1 ? pr.next : addDays(pr.next, Math.round(pr.avg * (k - 1)));
     for (let j = 0; j < pr.avgDur; j++) {
       const d = addDays(s, j);
       if (d >= hoje) out.add(d);
@@ -208,7 +291,7 @@ export function parseImport(text, hoje = today()) {
 //  - Firebase (nuvem) quando configurado
 //  - Modo teste (só no aparelho) quando não configurado
 // ===================================================================
-const state = { periods: [], tab: 'home', calMonth: null, user: null, mode: 'local' };
+const state = { periods: [], cramps: [], settings: { cramps: false }, tab: 'home', calMonth: null, user: null, mode: 'local' };
 const configured = firebaseConfig && firebaseConfig.apiKey && !String(firebaseConfig.apiKey).startsWith('COLE');
 
 const uid = () => (crypto.randomUUID ? crypto.randomUUID() : String(Date.now()) + Math.random().toString(16).slice(2));
@@ -217,11 +300,19 @@ const LocalStore = {
   key: 'meu_ciclo_periodos',
   read() { try { return JSON.parse(localStorage.getItem(this.key)) || []; } catch { return []; } },
   write(l) { try { localStorage.setItem(this.key, JSON.stringify(l)); } catch { } setPeriods(l); },
-  start() { setPeriods(this.read()); },
+  start() { state.cramps = this.readC(); state.settings = { cramps: false, ...this.readS() }; setPeriods(this.read()); },
   async add(p) { this.write([...this.read(), { id: uid(), start: p.start, end: p.end || null }]); },
   async addMany(list) { this.write([...this.read(), ...list.map((p) => ({ id: uid(), start: p.start, end: p.end || null }))]); },
   async update(id, data) { this.write(this.read().map((p) => (p.id === id ? { ...p, ...data } : p))); },
   async remove(id) { this.write(this.read().filter((p) => p.id !== id)); },
+  // cólicas e ajustes
+  ckey: 'meu_ciclo_colicas', skey: 'meu_ciclo_ajustes',
+  readC() { try { return JSON.parse(localStorage.getItem(this.ckey)) || []; } catch { return []; } },
+  writeC(l) { try { localStorage.setItem(this.ckey, JSON.stringify(l)); } catch { } setCramps(l); },
+  async addCramp(date) { const l = this.readC(); if (!l.some((c) => c.date === date)) this.writeC([...l, { id: uid(), date }]); },
+  async removeCramp(id) { this.writeC(this.readC().filter((c) => c.id !== id)); },
+  readS() { try { return JSON.parse(localStorage.getItem(this.skey)) || {}; } catch { return {}; } },
+  async setSetting(k, v) { const s = { ...this.readS(), [k]: v }; try { localStorage.setItem(this.skey, JSON.stringify(s)); } catch { } setSettings(s); },
   async signOut() { }
 };
 
@@ -239,8 +330,10 @@ async function createFirebaseStore() {
   try { db = F.initializeFirestore(app, { localCache: F.persistentLocalCache() }); }
   catch { db = F.getFirestore(app); }
 
-  let unsub = null;
+  let unsub = null, unsubC = null, unsubS = null;
   const col = () => F.collection(db, 'users', auth.currentUser.uid, 'periods');
+  const colC = () => F.collection(db, 'users', auth.currentUser.uid, 'cramps');
+  const docS = () => F.doc(db, 'users', auth.currentUser.uid, 'meta', 'settings');
 
   const store = {
     auth, A,
@@ -249,8 +342,22 @@ async function createFirebaseStore() {
       unsub = F.onSnapshot(F.collection(db, 'users', user.uid, 'periods'),
         (snap) => setPeriods(snap.docs.map((d) => ({ id: d.id, ...d.data() }))),
         (err) => { console.error(err); toast('Não consegui carregar seus dados. Confira as regras do Firestore.'); });
+      if (unsubC) unsubC();
+      unsubC = F.onSnapshot(F.collection(db, 'users', user.uid, 'cramps'),
+        (snap) => setCramps(snap.docs.map((d) => ({ id: d.id, ...d.data() }))), (err) => console.error(err));
+      if (unsubS) unsubS();
+      unsubS = F.onSnapshot(F.doc(db, 'users', user.uid, 'meta', 'settings'),
+        (snap) => setSettings(snap.exists() ? snap.data() : {}), (err) => console.error(err));
     },
-    stop() { if (unsub) unsub(); unsub = null; setPeriods([]); },
+    stop() {
+      [unsub, unsubC, unsubS].forEach((u) => u && u());
+      unsub = unsubC = unsubS = null;
+      state.cramps = []; state.settings = { cramps: false };
+      setPeriods([]);
+    },
+    async addCramp(date) { if (!state.cramps.some((c) => c.date === date)) await F.addDoc(colC(), { date, createdAt: F.serverTimestamp() }); },
+    async removeCramp(id) { await F.deleteDoc(F.doc(colC(), id)); },
+    async setSetting(k, v) { await F.setDoc(docS(), { [k]: v }, { merge: true }); },
     async add(p) { await F.addDoc(col(), { start: p.start, end: p.end || null, createdAt: F.serverTimestamp() }); },
     async addMany(list) {
       for (let i = 0; i < list.length; i += 400) {
@@ -269,6 +376,22 @@ async function createFirebaseStore() {
 function setPeriods(list) {
   state.periods = list.filter((p) => p.start && isValidISO(p.start));
   render();
+}
+function setCramps(list) { state.cramps = list.filter((c) => c.date && isValidISO(c.date)); render(); }
+function setSettings(obj) { state.settings = { cramps: false, ...obj }; render(); }
+
+// previsão usada nas telas (inclui a cólica só se ela ativou)
+function getPred() {
+  return predict(state.periods, today(), state.settings.cramps ? { cramps: state.cramps } : {});
+}
+
+async function toggleCramp(date) {
+  if (date > today()) return toast('Não dá pra marcar uma data no futuro.');
+  const ex = state.cramps.find((c) => c.date === date);
+  try {
+    if (ex) { await Store.removeCramp(ex.id); toast('Cólica removida'); }
+    else { await Store.addCramp(date); toast(date === today() ? 'Cólica registrada. Melhoras 💗' : `Cólica registrada em ${fmtShort(date)}`); }
+  } catch (e) { console.error(e); toast('Erro ao salvar. Tente de novo.'); }
 }
 
 // ===================================================================
@@ -390,7 +513,7 @@ function editSheet(p) {
 // ---------- Início ----------
 function renderHome() {
   const hoje = today();
-  const pr = predict(state.periods);
+  const pr = getPred();
   const head = `<div class="topbar"><h1>Meu Ciclo</h1><span class="date">${fmtShort(hoje)}</span></div>`;
   const banner = state.mode === 'local'
     ? `<div class="banner"><b>Modo teste:</b> os dados estão salvos só neste aparelho. Configure o Firebase para salvar na nuvem.</div>` : '';
@@ -463,14 +586,31 @@ function renderHome() {
       <div class="stat"><b>${sdTxt}</b><span>variação</span></div>
     </div>`;
 
-  const upcoming = [1, 2, 3].map((k) => addDays(pr.last.start, Math.round(pr.avg * k))).filter((s) => s >= hoje).slice(0, 3);
+  const upcoming = [0, 1, 2, 3].map((k) => addDays(pr.next, Math.round(pr.avg * k))).filter((s) => s >= hoje).slice(0, 3);
   const up = upcoming.length ? `
     <div class="section-title">Próximas previsões</div>
     <div class="card" style="padding:6px 18px">
       ${upcoming.map((s) => `<div class="row"><span>${fmtLong(s)}</span><span class="muted small">em ${diff(hoje, s)} dias</span></div>`).join('')}
     </div>` : '';
 
-  return `${head}${banner}${hero}${stats}${up}`;
+  let crampCard = '';
+  if (state.settings.cramps && !pr.ongoing) {
+    const todayC = state.cramps.find((c) => c.date === hoje);
+    const live = pr.cramp && pr.cramp.live;
+    let info = '';
+    if (live && pr.cramp.minLag === pr.cramp.maxLag) info = `Pela sua história, a menstruação vem ${pr.cramp.medLag} dias depois da primeira cólica.`;
+    else if (live) info = `Pela sua história, a menstruação vem de ${pr.cramp.minLag} a ${pr.cramp.maxLag} dias depois da primeira cólica.`;
+    else if (pr.cramp && pr.cramp.status === 'learning') info = `Aprendendo seu padrão: ${pr.cramp.count} de ${CRAMP_MIN} meses com cólica registrada.`;
+    crampCard = `
+      <div class="card" style="padding:16px 18px">
+        ${todayC
+          ? `<div style="display:flex;justify-content:space-between;align-items:center"><b>✓ Cólica registrada hoje</b><button class="btn-ghost" style="padding:4px 0;color:var(--red-dark);font-weight:600" data-act="cramp-today">Desfazer</button></div>`
+          : `<button class="btn btn-soft" data-act="cramp-today">Senti cólica hoje</button>`}
+        <div class="small muted" style="margin-top:8px;text-align:center">${info || 'Marque só cólica de TPM, não a da ovulação.'}</div>
+      </div>`;
+  }
+
+  return `${head}${banner}${hero}${crampCard}${stats}${up}`;
 }
 
 // ---------- Calendário ----------
@@ -478,9 +618,10 @@ function renderCal() {
   const hoje = today();
   if (!state.calMonth) state.calMonth = hoje.slice(0, 7);
   const [y, m] = state.calMonth.split('-').map(Number);
-  const pr = predict(state.periods);
+  const pr = getPred();
   const rec = recordedDays(state.periods, pr);
   const pred = predictedDays(pr);
+  const crampSet = new Set(state.settings.cramps ? state.cramps.map((c) => c.date) : []);
 
   const first = new Date(Date.UTC(y, m - 1, 1));
   const startOffset = first.getUTCDay();
@@ -497,6 +638,7 @@ function renderCal() {
     if (rec.has(d)) cls.push('period');
     else if (pred.has(d)) cls.push('pred');
     if (d === hoje) cls.push('today');
+    if (crampSet.has(d)) cls.push('cramp');
     cells += `<button class="${cls.join(' ')}" data-day="${d}">${dt.getUTCDate()}</button>`;
   }
 
@@ -513,15 +655,16 @@ function renderCal() {
         <span><i class="lg-period"></i>Menstruação</span>
         <span><i class="lg-pred"></i>Previsão</span>
         <span><i class="lg-today"></i>Hoje</span>
+        ${state.settings.cramps ? `<span><i class="lg-cramp"></i>Cólica</span>` : ''}
       </div>
     </div>
-    <div class="hint">Toque num dia para marcar início ou fim.</div>
+    <div class="hint">Toque num dia para marcar início ou fim${state.settings.cramps ? ' ou cólica' : ''}.</div>
     ${state.calMonth !== hoje.slice(0, 7) ? `<div style="text-align:center;margin-top:8px"><button class="btn-ghost btn" style="width:auto;display:inline-block" data-act="cal-today">Voltar para hoje</button></div>` : ''}`;
 }
 
 function daySheet(d) {
   const hoje = today();
-  const pr = predict(state.periods);
+  const pr = getPred();
   const rec = recordedDays(state.periods, pr);
   const p = rec.get(d);
   if (p) {
@@ -547,23 +690,26 @@ function daySheet(d) {
   }
   const before = sorted().filter((x) => x.start < d).pop();
   const canEnd = before && diff(before.start, d) < 15;
+  const hasCramp = state.cramps.some((c) => c.date === d);
   openSheet(`
     <h3>${fmtLong(d)}</h3>
     <p>O que aconteceu neste dia?</p>
     <div class="stack">
       <button class="btn btn-primary" id="ds-start">Menstruação começou</button>
       ${canEnd ? `<button class="btn btn-soft" id="ds-end">Menstruação acabou</button>` : ''}
+      ${state.settings.cramps ? `<button class="btn btn-soft" id="ds-cramp">${hasCramp ? 'Remover cólica deste dia' : 'Senti cólica neste dia'}</button>` : ''}
       <button class="btn btn-ghost" data-close>Cancelar</button>
     </div>`, (s) => {
     $('#ds-start', s).onclick = async () => { closeSheet(); await markStart(d); };
     const e = $('#ds-end', s); if (e) e.onclick = async () => { closeSheet(); await markEnd(d); };
+    const c = $('#ds-cramp', s); if (c) c.onclick = async () => { closeSheet(); await toggleCramp(d); };
   });
 }
 
 // ---------- Histórico ----------
 function renderHist() {
   const ps = sorted();
-  const pr = predict(ps);
+  const pr = getPred();
   if (!ps.length) {
     return `<div class="topbar"><h1>Histórico</h1></div>
       <div class="card empty"><div style="font-size:40px">📅</div><h2>Nada por aqui ainda</h2>
@@ -629,6 +775,31 @@ function renderHist() {
 }
 
 // ---------- Ajustes ----------
+function crampSettingsHTML() {
+  const pr = getPred();
+  const m = pr ? pr.cramp : null;
+  const fmtE = (x) => x.toFixed(1).replace('.', ',');
+  let status;
+  if (!m || m.status === 'learning') {
+    const n = m ? m.count : 0;
+    status = `<b>Aprendendo seu padrão: ${n} de ${CRAMP_MIN} meses</b><br>Faltam ${CRAMP_MIN - n} ${CRAMP_MIN - n === 1 ? 'mês' : 'meses'} com cólica registrada antes da menstruação. Aí o app testa se a cólica melhora a previsão.`;
+  } else if (m.status === 'active') {
+    const faixa = m.minLag === m.maxLag ? `${m.medLag} dias` : `${m.minLag} a ${m.maxLag} dias`;
+    status = `<b>Ativa ✓</b><br>Sua menstruação costuma vir <b>${faixa}</b> depois da primeira cólica. Nos testes com seus meses antigos, errou em média ${fmtE(m.crampMAE)} dias, contra ${fmtE(m.baseMAE)} dias usando só as datas.`;
+  } else {
+    status = `<b>Ainda não ajudou</b><br>Com seus ${m.count} meses registrados, a cólica errou em média ${fmtE(m.crampMAE)} dias, contra ${fmtE(m.baseMAE)} dias usando só as datas. O app continua usando só as datas e testa de novo a cada mês.`;
+  }
+  return `
+    <div class="tip-box">
+      <b>Marque só a cólica de TPM</b>, aquela que aparece nos dias antes de menstruar.<br><br>
+      <b>Não marque a cólica da ovulação.</b> Ela costuma vir no meio do ciclo, umas duas semanas antes da menstruação, às vezes de um lado só da barriga. Ela não ajuda a prever e atrapalha a conta. Também não marque dores por outros motivos.<br><br>
+      Para se proteger de enganos, o app só considera cólicas dos ${CRAMP_WINDOW} dias antes de cada menstruação.
+    </div>
+    <div class="small" style="margin:12px 0;line-height:1.5">${status}</div>
+    <button class="btn btn-soft" data-act="import-cramps">Importar cólicas do ChatGPT</button>
+    <div class="small muted" style="margin-top:8px;text-align:center">Também dá pra marcar cólicas antigas tocando no dia, no Calendário.</div>`;
+}
+
 const CHATGPT_PROMPT = 'Liste todas as datas de menstruação que eu te passei, uma por linha, no formato DD/MM/AAAA - DD/MM/AAAA (início - fim). Se não souber o fim, coloque só a data de início. Não escreva mais nada além da lista.';
 
 function renderSet() {
@@ -639,6 +810,14 @@ function renderSet() {
       <b>Importar datas antigas</b>
       <p class="muted small" style="margin:6px 0 14px">Cole uma lista de datas, uma menstruação por linha. Quanto mais ciclos, mais precisa fica a previsão.</p>
       <button class="btn btn-soft" data-act="import">Importar datas</button>
+    </div>
+    <div class="section-title">Cólica</div>
+    <div class="card">
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:14px">
+        <div><b>Registrar cólicas</b><div class="small muted">Usa a cólica de TPM para ajustar a previsão.</div></div>
+        <button class="switch ${state.settings.cramps ? 'on' : ''}" data-act="toggle-cramps" role="switch" aria-checked="${state.settings.cramps}" aria-label="Registrar cólicas"><i></i></button>
+      </div>
+      ${state.settings.cramps ? crampSettingsHTML() : ''}
     </div>
     <div class="section-title">Conta</div>
     <div class="card" style="padding:4px 18px">
@@ -656,6 +835,58 @@ function renderSet() {
       A previsão usa as datas de início. Quando há pelo menos ${MIN_TREINO + MIN_TESTES} ciclos registrados, o app testa ${METHODS.length} métodos no seu próprio histórico e usa o que mais acertou. A margem de dias vem do erro real desses testes. Veja os detalhes na aba Histórico.<br><br>
       É uma estimativa para você se organizar. Não serve como método anticoncepcional nem substitui sua médica.
     </div>`;
+}
+
+const CHATGPT_CRAMP_PROMPT = 'Liste todos os dias em que eu te contei que senti cólica, um por linha, no formato DD/MM/AAAA. Não escreva mais nada além da lista.';
+
+function importCrampsSheet() {
+  openSheet(`
+    <h3>Importar cólicas</h3>
+    <p>Um dia por linha, por exemplo: <b>06/09/2026</b>.</p>
+    <p class="small" style="margin-top:-6px">Mande esta mensagem na conversa do ChatGPT onde você contava as datas, e cole aqui a resposta:</p>
+    <div class="prompt-box">${CHATGPT_CRAMP_PROMPT}</div>
+    <button class="btn btn-soft" id="ic-copy" style="padding:12px;margin-bottom:12px">Copiar mensagem</button>
+    <textarea id="ic-text" placeholder="06/09/2026&#10;09/11/2026&#10;..."></textarea>
+    <div id="ic-preview"></div>
+    <div class="stack" style="margin-top:14px">
+      <button class="btn btn-primary" id="ic-check">Conferir</button>
+      <button class="btn btn-ghost" data-close>Cancelar</button>
+    </div>`, (s) => {
+    $('#ic-copy', s).onclick = async () => {
+      try { await navigator.clipboard.writeText(CHATGPT_CRAMP_PROMPT); toast('Mensagem copiada'); }
+      catch { toast('Não consegui copiar. Segure o texto para copiar.'); }
+    };
+    let ready = null;
+    $('#ic-text', s).oninput = () => { ready = null; $('#ic-check', s).textContent = 'Conferir'; $('#ic-preview', s).innerHTML = ''; };
+    $('#ic-check', s).onclick = async () => {
+      if (ready) {
+        const btn = $('#ic-check', s); btn.disabled = true; btn.textContent = 'Importando…';
+        try {
+          for (const d of ready) await Store.addCramp(d);
+          closeSheet(); toast(`${ready.length} ${ready.length === 1 ? 'cólica importada' : 'cólicas importadas'} ✓`);
+        } catch (e) { console.error(e); btn.disabled = false; btn.textContent = 'Tentar de novo'; toast('Erro ao importar.'); }
+        return;
+      }
+      const list = parseImport($('#ic-text', s).value).map((p) => p.start);
+      if (!list.length) return toast('Não encontrei nenhuma data no texto.');
+      const existing = new Set(state.cramps.map((c) => c.date));
+      const seen = new Set(); const hoje = today();
+      const rows = list.map((d) => {
+        let skip = null;
+        if (d > hoje) skip = 'futuro';
+        else if (existing.has(d)) skip = 'já existe';
+        else if (seen.has(d)) skip = 'repetida';
+        seen.add(d);
+        return { d, skip };
+      });
+      const ok = rows.filter((r) => !r.skip);
+      $('#ic-preview', s).innerHTML = `
+        <p class="small" style="margin:14px 0 4px"><b>${ok.length}</b> para importar${rows.length - ok.length ? `, ${rows.length - ok.length} ignoradas` : ''}:</p>
+        <div class="preview">${rows.map((r) => `<div><span>${fmtLong(r.d)} ${parseISO(r.d).getUTCFullYear()}</span>${r.skip ? `<span class="tag skip">${r.skip}</span>` : `<span class="tag">ok</span>`}</div>`).join('')}</div>
+        <p class="small muted" style="margin-top:8px">Cólicas fora dos ${CRAMP_WINDOW} dias antes de uma menstruação ficam salvas, mas não entram na previsão.</p>`;
+      if (ok.length) { ready = ok.map((r) => r.d); $('#ic-check', s).textContent = `Importar ${ok.length}`; }
+    };
+  });
 }
 
 function importSheet() {
@@ -739,6 +970,13 @@ document.addEventListener('click', async (e) => {
   if (act === 'go-import') { goTab('set'); return importSheet(); }
   if (act === 'import') return importSheet();
   if (act === 'install') return showInstall();
+  if (act === 'cramp-today') return toggleCramp(today());
+  if (act === 'import-cramps') return importCrampsSheet();
+  if (act === 'toggle-cramps') {
+    try { await Store.setSetting('cramps', !state.settings.cramps); }
+    catch (err) { console.error(err); toast('Erro ao salvar o ajuste.'); }
+    return;
+  }
   if (act === 'prev-month' || act === 'next-month') {
     const [y, m] = state.calMonth.split('-').map(Number);
     const d = new Date(Date.UTC(y, m - 1 + (act === 'next-month' ? 1 : -1), 1));

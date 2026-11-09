@@ -186,6 +186,16 @@
   .install .arrow svg { width: 30px; height: 30px; animation: bob 1.2s ease-in-out infinite; }
   @keyframes bob { 0%,100% { transform: translateY(0); } 50% { transform: translateY(7px); } }
 
+  /* ---------- cólica ---------- */
+  .day.cramp::after { content: ""; position: absolute; bottom: 12%; left: 50%; width: 6px; height: 6px; margin-left: -3px; border-radius: 50%; background: var(--plum); }
+  .day.period.cramp::after { background: #fff; }
+  .lg-cramp { width: 8px !important; height: 8px !important; background: var(--plum); margin-left: 3px; }
+  .switch { width: 52px; height: 32px; border-radius: 99px; background: #E3D6D9; position: relative; flex: none; transition: background .2s; }
+  .switch i { position: absolute; top: 3px; left: 3px; width: 26px; height: 26px; border-radius: 50%; background: #fff; box-shadow: 0 2px 6px rgba(0,0,0,.2); transition: transform .2s; }
+  .switch.on { background: var(--red); }
+  .switch.on i { transform: translateX(20px); }
+  .tip-box { background: var(--bg); border-radius: 14px; padding: 12px 14px; font-size: 13.5px; line-height: 1.5; margin-top: 14px; }
+
   .loading { display: grid; place-items: center; min-height: 80vh; color: var(--muted); }
 </style>
 </head>
@@ -244,6 +254,6 @@
 <div id="sheet" class="sheet hidden"></div>
 <div id="toast" class="toast"></div>
 
-<script type="module" src="app.js?v=4"></script>
+<script type="module" src="app.js?v=5"></script>
 </body>
 </html>

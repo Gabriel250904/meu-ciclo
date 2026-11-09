@@ -1,10 +1,10 @@
 // Service worker: deixa o app abrir rápido e funcionar sem internet.
 // Ao lançar uma versão nova, aumente este número junto com o ?v= do index.html.
-const CACHE = 'meu-ciclo-v4';
+const CACHE = 'meu-ciclo-v5';
 const SHELL = [
   './',
   './index.html',
-  './app.js?v=4',
+  './app.js?v=5',
   './firebase-config.js',
   './manifest.json',
   './icons/icon-180.png',
